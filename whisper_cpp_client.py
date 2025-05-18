@@ -442,6 +442,7 @@ def record_to_queue():
     global running
     while running:
         record_process = delayRecord(tempfile.mktemp()+ '.wav')
+        record_process.stop_after = 1.5
         record_process.start()
         audio_queue.put(record_process.file_name)
 
