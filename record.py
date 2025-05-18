@@ -100,13 +100,15 @@ class delayRecord:
         logging.debug(f"format {rate}")
         logging.debug(f"using {enc} encoder")
         src = "autoaudiosrc" # alsasrc | pulsesrc
-        delay = "ladspa-delay-so-delay-5s"
+        # Use ladspa-cmt-so-delay-5s (Echo Delay Line with Maximum Delay 5s)
+        delay = "ladspa-cmt-so-delay-5s delay=5.0 dry-wet-balance=1.0"
         # valve-type elements require async=off downstream
         self.pipeline = Gst.parse_launch(
         f"{src} ! tee name=t ! {delay} name=d ! valve name=v ! {self.gstreamer} audioconvert ! queue ! audioresample ! {rate} {enc} ! filesink name=fs location={file_name} async=false t. ! queue ! level ! fakesink"
         )
         self.filesink = self.pipeline.get_by_name('fs')
         self.delay = self.pipeline.get_by_name('d')
+        # Set delay properties
         self.delay.set_property("delay", self.preroll)
         self.delay.set_property("dry-wet-balance", 1.0)
         self.valve = self.pipeline.get_by_name('v')
@@ -180,24 +182,29 @@ class delayRecord:
 
     # Draw a VU meter in the terminal
     def draw_meter(self, level:float):
-        terminal_size = os.get_terminal_size()
-        mw = int(self.meter_w)
-        sw = mw + 3
         try:
+            # Try to get terminal size, but use default if it fails
+            try:
+                terminal_size = os.get_terminal_size()
+                term_columns = terminal_size.columns
+            except OSError:
+                # Default size if terminal size cannot be determined
+                term_columns = 80
+                
+            mw = int(self.meter_w)
+            sw = mw + 3
             level = 1 - (level / -sw)
             num_chars = max(int(level * mw), 0)
-            if terminal_size.columns < sw + 28:
+            
+            if term_columns < sw + 28:
                 meter_chars = 'Terminal too small'
             else:
                 meter_chars = '=' * num_chars + '-' * (mw - num_chars)
+                
             meterString = f"[{meter_chars}] {(1 - level) * -sw:.1f} dB"
-            print("\r", end='')
-            leftToDelete = terminal_size.columns - 2
-            for x in range(leftToDelete):
-                print(' ' * (leftToDelete - x), x, end='\x1b[1K\r')
-            print(f"\r{meterString}", end='')
-        except Exception:
-            logging.exception("Failed writing volume meter to terminal!")
+            print(f"\r{meterString}", end='', flush=True)
+        except Exception as e:
+            logging.debug(f"Failed writing volume meter: {str(e)}")
 
     def print_help(self, options):
         print("""Usage:  record.py

@@ -41,6 +41,22 @@ record_process = None
 running = True
 cam = None
 
+# Status indicator settings
+show_status = os.getenv("SHOW_PROCESSING_STATUS", "false").lower() in ["true", "1", "yes", "y"]
+processing_color = os.getenv("PROCESSING_COLOR", "\033[1;33m")  # Default: Yellow
+idle_color = os.getenv("IDLE_COLOR", "\033[1;32m")              # Default: Green
+reset_color = os.getenv("RESET_COLOR", "\033[0m")               # Default: Reset
+
+def show_processing_status():
+    """Display processing status indicator"""
+    if show_status:
+        print(f"{bs}{processing_color}[PROCESSING]{reset_color} Analyzing speech...", end="", flush=True)
+
+def show_idle_status():
+    """Display idle status indicator"""
+    if show_status:
+        print(f"{bs}{idle_color}[IDLE]{reset_color} Waiting for speech input...", end="", flush=True)
+
 logging.basicConfig(
 	level=logging.INFO,
 	format="[%(levelname)s] %(lineno)d %(message)s",
@@ -59,15 +75,31 @@ cpp_url = "http://127.0.0.1:7777/inference"
 fallback_chat_url = "http://localhost:8888/v1"
 debug = False
 
+# OpenAI API configuration
 gpt_key = os.getenv("OPENAI_API_KEY")
-client = OpenAI(api_key=gpt_key)
-if not (gpt_key):
-    logging.debug("Export OPENAI_API_KEY if you want answers from ChatGPT.\n")
+client = None
+openai_whisper = False  # Flag to use OpenAI's Whisper API instead of local server
+
+if gpt_key:
+    from openai import OpenAI
+    client = OpenAI(api_key=gpt_key)
+    # Check if user wants to use OpenAI for transcription
+    openai_whisper = os.getenv("USE_OPENAI_WHISPER", "false").lower() in ["true", "1", "yes", "y"]
+    if openai_whisper:
+        print("Using OpenAI's Whisper API for speech recognition")
+    else:
+        print("Using local whisper.cpp server for speech recognition")
+        print("Set USE_OPENAI_WHISPER=true to use OpenAI's Whisper API instead")
+    logging.debug("OpenAI API key found. ChatGPT responses available.\n")
+else:
+    logging.debug("Export OPENAI_API_KEY if you want answers from ChatGPT or use Whisper API.\n")
+
 gem_key = os.getenv("GENAI_TOKEN")
 if (gem_key):
     import google.generativeai as genai
     genai.configure(api_key=gem_key)
     model = genai.GenerativeModel("gemini-1.5-flash")
+    logging.debug("Gemini API key found. Gemini responses available.\n")
 else:
     logging.debug("Export GENAI_TOKEN if you want answers from Gemini.\n")
 
@@ -179,39 +211,94 @@ def process_hotkeys(txt: str) -> bool:
     return False
 
 def gettext(f:str) -> str:
+    """
+    Convert audio file to text using either local whisper.cpp server or OpenAI's Whisper API
+    """
     result = ['']
-    if f and os.path.isfile(f):
-        files = {'file': (f, open(f, 'rb'))}
-        data = {'temperature': '0.2', 'response_format': 'json'}
-
-        try:
-            response = requests.post(cpp_url, files=files, data=data)
-            response.raise_for_status()  # Check for errors
-
-            # Parse the JSON response
-            result = [response.json()]
-            return result[0]['text']
-
-        except requests.exceptions.RequestException as e:
-            logging.debug(f"{bs}Error: {e}")
-            return ""
+    if not f or not os.path.isfile(f):
         return ""
+    
+    # Show processing status
+    show_processing_status()
+        
+    # If OpenAI's Whisper API is enabled and API key is available
+    if openai_whisper and client:
+        try:
+            with open(f, "rb") as audio_file:
+                logging.debug("Sending audio to OpenAI Whisper API...")
+                transcription = client.audio.transcriptions.create(
+                    model="whisper-1",
+                    file=audio_file,
+                    language="en",
+                    temperature=0.0,
+                    response_format="text"
+                )
+                # Show idle status after processing
+                show_idle_status()
+                # OpenAI API returns text directly
+                return transcription
+                
+        except Exception as e:
+            logging.error(f"{bs}OpenAI API Error: {e}")
+            logging.info("Falling back to local server...")
+            # Fall back to local server if OpenAI API fails
+    
+    # Use local whisper.cpp server
+    try:
+        logging.debug("Sending audio to local whisper.cpp server...")
+        files = {'file': (f, open(f, 'rb'))}
+        # Enhanced parameters for better recognition
+        data = {
+            'temperature': '0.0',      # Lower temperature for more deterministic output
+            'response_format': 'json', 
+            'word_timestamps': 'true', # Get word-level timestamps
+            'language': 'en',          # Force English language
+            'beam_size': '5',          # Increase beam size for better accuracy
+        }
+
+        response = requests.post(cpp_url, files=files, data=data)
+        response.raise_for_status()  # Check for errors
+
+        # Parse the JSON response
+        result = [response.json()]
+        
+        # Show idle status after processing
+        show_idle_status()
+        return result[0]['text']
+
+    except requests.exceptions.RequestException as e:
+        logging.error(f"{bs}Local Server Error: {e}")
+        # Show idle status even after error
+        show_idle_status()
+        return ""
+    
+    # Show idle status if we somehow reached here
+    show_idle_status()
+    return ""
 
 print("Tab over to another window and start speaking.")
 print("Text should appear in the window you are working in.")
 print("Say \"Stop listening.\" or press CTRL-C to stop.")
 say("All systems ready.")
 
+# Show initial idle status indicator
+show_idle_status()
+
 messages = [{ "role": "system", "content": "In this conversation between `user:` and `assistant:`, play the role of assistant. Reply as a helpful assistant." },]
 
 def generate_text(prompt: str):
     conversation_length = 9 # try increasing if AI model has a large ctx window
-    logging.debug(f"{bs}Asking ChatGPT") 
     global chatting, messages, gpt_key, gem_key
     messages.append({"role": "user", "content": prompt})
     completion = ""
+    
+    # Show processing status for AI generation
+    if show_status:
+        print(f"{bs}{processing_color}[PROCESSING]{reset_color} Generating AI response...", end="", flush=True)
+    
     # Try chatGPT
-    if gpt_key:
+    if gpt_key and client:
+        logging.debug(f"{bs}Asking ChatGPT")
         try:
             completion = client.chat.completions.create(model="gpt-3.5-turbo",
             messages=messages)
@@ -236,6 +323,7 @@ def generate_text(prompt: str):
         logging.debug(f"Querying {fallback_chat_url}")
         # ref. llama.cpp/examples/server/README.md
         try:
+            import openai
             client = openai.OpenAI(
             base_url=fallback_chat_url,
             api_key = "sk-no-key-required")
@@ -243,10 +331,13 @@ def generate_text(prompt: str):
                 model="gpt-3.5-turbo",
                 messages=messages
             )
+            completion = completion.choices[0].message.content
         except Exception as e:
             logging.debug(f"Error: {e}")
-            return "Sorry. I'm having some trouble accessing that."
-        completion = completion.choices[0].message.content
+            completion = "I'm sorry, I can't assist with that right now."
+
+    # Show idle status after processing
+    show_idle_status()
 
     if completion:
         print(f"{bs}{completion}")

@@ -39,51 +39,24 @@ logging.basicConfig(
 )
 def say(text, base_url="http://localhost:59125/api/tts"):
     global pipeline
-    # Define the parameters for the TTS request
-    params = {'text': text, "voice": "en_US/vctk_low"}
-    query_string = "&".join(f"{k}={urllib.parse.quote_plus(v)}" for k, v in params.items())
-    # Define the GStreamer pipeline
-    pipeline_description = (
-        f" souphttpsrc name=soup location={base_url}?{query_string} "
-        "! wavparse "
-        "! audioconvert "
-        "! audioresample "
-        "! autoaudiosink"
-    )
-    pipeline = Gst.parse_launch(pipeline_description)
-
-    # Bus callback to handle EOS and ERROR
-    def on_message(bus, message):
-        global pipeline
-        mtype = message.type
-        if mtype == Gst.MessageType.EOS:
-            logging.debug("End-Of-Stream reached.")
-            pipeline.set_state(Gst.State.NULL)
-        elif mtype == Gst.MessageType.ERROR:
-            err, debug = message.parse_error()
-            logging.debug(f"Error received from element {message.src.get_name()}: {err.message}", file=sys.stderr)
-            if debug:
-                logging.debug(f"Debugging information: {debug}", file=sys.stderr)
-        return True
-
-    # Add a bus watch to the pipeline
-    bus = pipeline.get_bus()
-    bus.add_signal_watch()
-    bus.connect("message", on_message)
-
-    # Start the pipeline
-    pipeline.set_state(Gst.State.PLAYING)
+    # For now, just print the text instead of speaking it
+    print(f"[SPEECH]: {text}")
+    # Keep pipeline as None to avoid errors in shutup()
+    pipeline = None
 
 def shutup():
     global pipeline
+    # Skip if pipeline is None
+    if pipeline is None:
+        return
+    
     for element in pipeline.children:
         if isinstance(element, Gst.Element):
             element.set_state(Gst.State.NULL)
     time.sleep(0.2)
-    if pipeline is not None:
-        pipeline.send_event(Gst.Event.new_eos())
-        time.sleep(0.6)
-        pipeline.set_state(Gst.State.NULL)
+    pipeline.send_event(Gst.Event.new_eos())
+    time.sleep(0.6)
+    pipeline.set_state(Gst.State.NULL)
 
 # Example usage
 if __name__ == "__main__":
