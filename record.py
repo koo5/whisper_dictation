@@ -101,7 +101,11 @@ class delayRecord:
         logging.debug(f"using {enc} encoder")
         src = "autoaudiosrc" # alsasrc | pulsesrc
         # Use ladspa-cmt-so-delay-5s (Echo Delay Line with Maximum Delay 5s)
-        delay = "ladspa-cmt-so-delay-5s delay=5.0 dry-wet-balance=1.0"
+        #delay = "ladspa-cmt-so-delay-5s delay=5.0 dry-wet-balance=1.0"
+        # sudo apt install ladspa-sdk
+
+        delay = "ladspa-delay-so-delay-5s"
+        #delay = "delay_5s"
         # valve-type elements require async=off downstream
         self.pipeline = Gst.parse_launch(
         f"{src} ! tee name=t ! {delay} name=d ! valve name=v ! {self.gstreamer} audioconvert ! queue ! audioresample ! {rate} {enc} ! filesink name=fs location={file_name} async=false t. ! queue ! level ! fakesink"
