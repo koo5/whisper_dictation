@@ -37,12 +37,12 @@ from gi.repository import Gst, GLib
 Gst.init(None)
 
 logging.basicConfig(
-	level=logging.INFO,
-	format="%(asctime)s [%(levelname)s] %(lineno)d %(message)s",
-	handlers=[
-#		logging.FileHandler('/tmp/rec.log'),
-		logging.StreamHandler()
-	]
+    level=logging.INFO,
+    format="%(asctime)s [%(levelname)s] %(lineno)d %(message)s",
+    handlers=[
+#        logging.FileHandler('/tmp/rec.log'),
+        logging.StreamHandler(sys.stderr)
+    ]
 )
 def unique_file_name(file_name):
     """
@@ -206,7 +206,7 @@ class delayRecord:
                 meter_chars = '=' * num_chars + '-' * (mw - num_chars)
                 
             meterString = f"[{meter_chars}] {(1 - level) * -sw:.1f} dB"
-            print(f"\r{meterString}", end='', flush=True)
+            print(f"\r{meterString}", end='', flush=True, file=sys.stderr)
         except Exception as e:
             logging.debug(f"Failed writing volume meter: {str(e)}")
 
@@ -230,10 +230,10 @@ class delayRecord:
         self.gstreamer  = ""
         self.minutes    = 10
         self.ignore     = 0.3
-        self.preroll    = 1.0
+        self.preroll    = 0.6
         self.meter_w   = 25.0
-        self.stop_after = 1.2
-        self.threshold  = -20
+        self.stop_after = 2.2
+        self.threshold  = -30
         self.rate       = "audio/x-raw,rate=16000,channels=1,format=S16LE ! "
         lsa = len(sys.argv)
         if lsa == 1: return file_name
