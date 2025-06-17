@@ -62,6 +62,25 @@ idle_color = os.getenv("IDLE_COLOR", "\033[1;32m")              # Default: Green
 whisper_language =  os.getenv("WHISPER_LANGUAGE", NotGiven())
 # Model setting for OpenAI Whisper API
 whisper_model = os.getenv("WHISPER_MODEL", "whisper-1")  # Default: whisper-1
+
+# Ignore patterns for transcriptions
+ignore_patterns = os.getenv("IGNORE_PATTERNS", "")
+if not ignore_patterns and whisper_language:
+    # Only apply default patterns if language is explicitly set
+    lang = str(whisper_language).lower()
+    if lang == "cs":
+        default_ignores = [
+            "http://johnyxcz.blogspot.com",
+            "http://johnyxcz.com", 
+            "Titulky vytvořil JohnyX",
+            "www.hradeckesluzby.cz",
+            "www.arkance-systems.cz"
+        ]
+        # Convert to regex patterns (escape special chars and make case-insensitive)
+        ignore_patterns = "|".join(re.escape(pattern) for pattern in default_ignores)
+    elif lang == "en":
+        ignore_patterns = re.escape("Thanks for watching")
+
 reset_color = os.getenv("RESET_COLOR", "\033[0m")               # Default: Reset
 
 def show_processing_status():
@@ -544,8 +563,13 @@ def transcribe():
                         print(bs + txt.strip())
                     # filter it out
                     txt = re.sub(r'[\*\[\(][^\]\)]*[\]\)\*]*\s*$', '', txt)
-                if txt == " " or txt == "you " or txt == "Thanks for watching! ":
+                if txt == " " or txt == "you ":
                     continue # ignoring you
+                
+                # Check against ignore patterns
+                if ignore_patterns and re.search(ignore_patterns, txt, re.IGNORECASE):
+                    logging.debug(f"Ignoring transcription matching pattern: '{txt.strip()}'")
+                    continue
                 # get lower-case spoken command string
                 lower_case = txt.lower().strip()
                 if not lower_case: continue
