@@ -69,17 +69,18 @@ if not ignore_patterns and whisper_language:
     # Only apply default patterns if language is explicitly set
     lang = str(whisper_language).lower()
     if lang == "cs":
-        default_ignores = [
-            "http://johnyxcz.blogspot.com",
-            "http://johnyxcz.com", 
-            "Titulky vytvořil JohnyX",
-            "www.hradeckesluzby.cz",
-            "www.arkance-systems.cz"
-        ]
-        # Convert to regex patterns (escape special chars and make case-insensitive)
-        ignore_patterns = "|".join(re.escape(pattern) for pattern in default_ignores)
+        # Regex pattern for Czech - some are substring matches, some are exact
+        ignore_patterns = (
+            # Substring matches (anywhere in text)
+            r"http://johnyxcz\.blogspot\.com|" +
+            r"http://johnyxcz\.com|" +
+            r"Titulky vytvořil JohnyX|" +
+            r"www\.hradeckesluzby\.cz|" +
+            r"www\.arkance-systems\.cz"
+        )
     elif lang == "en":
-        ignore_patterns = re.escape("Thanks for watching")
+        # Regex pattern for English - exact matches for common whisper artifacts
+        ignore_patterns = r"^Thanks for watching!?\s*$|^you\s*$"
 
 reset_color = os.getenv("RESET_COLOR", "\033[0m")               # Default: Reset
 
@@ -563,8 +564,8 @@ def transcribe():
                         print(bs + txt.strip())
                     # filter it out
                     txt = re.sub(r'[\*\[\(][^\]\)]*[\]\)\*]*\s*$', '', txt)
-                if txt == " " or txt == "you ":
-                    continue # ignoring you
+                if txt == " ":
+                    continue # ignoring empty
                 
                 # Check against ignore patterns
                 if ignore_patterns and re.search(ignore_patterns, txt, re.IGNORECASE):
