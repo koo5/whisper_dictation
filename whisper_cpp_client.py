@@ -76,7 +76,8 @@ if not ignore_patterns and whisper_language:
             r"http://johnyxcz\.com|" +
             r"Titulky vytvořil JohnyX|" +
             r"www\.hradeckesluzby\.cz|" +
-            r"www\.arkance-systems\.cz"
+            r"www\.arkance-systems\.cz|" +
+            r"děkujeme za pozornost"
         )
     elif lang == "en":
         # Regex pattern for English - exact matches for common whisper artifacts
