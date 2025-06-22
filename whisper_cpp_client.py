@@ -63,6 +63,10 @@ whisper_language =  os.getenv("WHISPER_LANGUAGE", NotGiven())
 # Model setting for OpenAI Whisper API
 whisper_model = os.getenv("WHISPER_MODEL", "whisper-1")  # Default: whisper-1
 
+# Repetition removal settings
+min_repetitions = int(os.getenv("MIN_REPETITIONS", "6"))  # Minimum repetitions to trigger removal
+keep_repetitions = int(os.getenv("KEEP_REPETITIONS", "5"))  # Number of repetitions to keep
+
 # Ignore patterns for transcriptions
 ignore_patterns = os.getenv("IGNORE_PATTERNS", "")
 if not ignore_patterns and whisper_language:
@@ -81,7 +85,7 @@ if not ignore_patterns and whisper_language:
         )
     elif lang == "en":
         # Regex pattern for English - exact matches for common whisper artifacts
-        ignore_patterns = r"^Thanks for watching!?\s*$|^you\s*$"
+        ignore_patterns = r"^Thanks for watching!?\s*$|^you\s*$|^Bye\.$"
 
 reset_color = os.getenv("RESET_COLOR", "\033[0m")               # Default: Reset
 
@@ -515,6 +519,37 @@ def resume_dictation():
     chatting = False
     listening = True
 
+def remove_repetitions(text, min_repetitions=6, keep_repetitions=5):
+    """
+    Remove excessive repetitive patterns from text, keeping only a specified number of repetitions.
+    
+    Args:
+        text: The input text to process
+        min_repetitions: Minimum number of repetitions to consider as excessive (default: 6)
+        keep_repetitions: Number of repetitions to keep (default: 5)
+    
+    Returns:
+        Text with repetitions reduced to keep_repetitions occurrences
+    """
+    if not text:
+        return text
+    
+    # Start with small pattern sizes and work up to larger ones
+    # This helps catch both single character and longer phrase repetitions
+    max_pattern_length = min(len(text) // min_repetitions, 100)  # Cap at 100 chars for performance
+    
+    for pattern_length in range(1, max_pattern_length + 1):
+        # Use regex to find consecutive repetitions of patterns
+        # The pattern captures any sequence of 'pattern_length' characters
+        # and checks if it repeats min_repetitions or more times
+        pattern = r'(.{' + str(pattern_length) + r'})(?:\1){' + str(min_repetitions - 1) + r',}'
+        
+        # Replace with the pattern repeated keep_repetitions times
+        replacement = r'\1' * keep_repetitions
+        text = re.sub(pattern, replacement, text)
+    
+    return text
+
 def transcribe():
     global listening
     iteration_count = 0
@@ -567,6 +602,9 @@ def transcribe():
                     txt = re.sub(r'[\*\[\(][^\]\)]*[\]\)\*]*\s*$', '', txt)
                 if txt == " ":
                     continue # ignoring empty
+                
+                # Remove excessive repetitions
+                txt = remove_repetitions(txt, min_repetitions, keep_repetitions)
                 
                 # Check against ignore patterns
                 if ignore_patterns and re.search(ignore_patterns, txt, re.IGNORECASE):
