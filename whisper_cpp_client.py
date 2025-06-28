@@ -85,7 +85,7 @@ if not ignore_patterns and whisper_language:
         )
     elif lang == "en":
         # Regex pattern for English - exact matches for common whisper artifacts
-        ignore_patterns = r"^Thanks for watching!?\s*$|^you\s*$|^Bye\.$"
+        ignore_patterns = r"^Thanks for watching!?\s*$|^Thank you( very much| so much)?\.?\s*$|^you\s*$|^Bye\.$"
 
 reset_color = os.getenv("RESET_COLOR", "\033[0m")               # Default: Reset
 
