@@ -67,12 +67,15 @@ def unique_file_name(file_name):
     return file_name
 
 class delayRecord:
-    def __init__(self, file_name = ""):
+    def __init__(self, file_name = "", threshold = None):
         # set default options
         self.recording   = False
         self.quiet_timer = self.sound_timer = time.time() # start timers
         from_options = self.process_options()
         if not file_name: file_name = from_options
+        # Allow threshold override after processing options
+        if threshold is not None:
+            self.threshold = threshold
         ext = os.path.splitext(file_name)[1].lower()
         # Avoid overwriting files
         file_name = self.file_name = unique_file_name(file_name)

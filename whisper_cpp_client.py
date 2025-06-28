@@ -85,7 +85,7 @@ if not ignore_patterns and whisper_language:
         )
     elif lang == "en":
         # Regex pattern for English - exact matches for common whisper artifacts
-        ignore_patterns = r"^Thanks for watching!?\s*$|^Thank you( very much| so much)?\.?\s*$|^you\s*$|^Bye\.$"
+        ignore_patterns = r"^Thanks for watching!?\s*$|^Thank you( very much| so much)?\.?\s*$|^you\s*$|^Bye\.$|^Bye-bye\.$"
 
 reset_color = os.getenv("RESET_COLOR", "\033[0m")               # Default: Reset
 
@@ -608,7 +608,12 @@ def transcribe():
                 
                 # Check against ignore patterns
                 if ignore_patterns and re.search(ignore_patterns, txt, re.IGNORECASE):
-                    logging.debug(f"Ignoring transcription matching pattern: '{txt.strip()}'")
+                    logging.debug(f"[IGNORED] Transcription matching pattern: '{txt.strip()}'")
+                    # Always show ignored messages with [IGNORED] prefix
+                    if quiet_mode:
+                        print(f"{bs}[IGNORED] {txt.strip()}", file=sys.stderr)
+                    else:
+                        print(f"{bs}[IGNORED] {txt.strip()}")
                     continue
                 # get lower-case spoken command string
                 lower_case = txt.lower().strip()
@@ -680,7 +685,8 @@ def record_mp3():
     if not quiet_mode:
         say("Recording audio clip...")
     time.sleep(1)
-    rec = delayRecord("audio.mp3")
+    voice_threshold = float(os.getenv("VOICE_THRESHOLD", "-30"))
+    rec = delayRecord("audio.mp3", threshold=voice_threshold)
     rec.start()
     if not quiet_mode:
         say(f"Recording saved to {rec.file_name}")
@@ -704,7 +710,8 @@ def record_to_queue():
             logging.debug(f"Starting recording #{recording_count} to file: {temp_file}")
             start_time = time.time()
             
-            record_process = delayRecord(temp_file)
+            voice_threshold = float(os.getenv("VOICE_THRESHOLD", "-30"))
+            record_process = delayRecord(temp_file, threshold=voice_threshold)
             record_process.stop_after = float(os.environ.get("STOP_AFTER", "2"))
             
             # Start recording in a separate thread to enable timeout
