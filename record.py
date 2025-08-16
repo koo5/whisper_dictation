@@ -152,20 +152,64 @@ class delayRecord:
 
     # If loaded as a module, the parent process can call this
     def stop_recording(self):
-        logging.debug("\n\nRecording stopped.\n")
-        self.pipeline.set_state(Gst.State.NULL)
-        self.loop.quit()
+        logging.debug("stop_recording() called")
+        
+        # Clean up bus connections first to avoid conflicts
+        if hasattr(self, 'bus') and self.bus:
+            logging.debug("Removing bus signal watch in stop_recording()")
+            try:
+                self.bus.remove_signal_watch()
+                logging.debug("Bus signal watch removed in stop_recording()")
+            except Exception as e:
+                logging.warning(f"Error removing bus signal watch in stop_recording(): {e}")
+        
+        # Properly stop the pipeline and release resources
+        logging.debug("Setting pipeline to NULL in stop_recording()")
+        try:
+            ret = self.pipeline.set_state(Gst.State.NULL)
+            logging.debug(f"stop_recording: set_state(NULL) returned: {ret}")
+            
+            # Wait for state change to complete with timeout
+            logging.debug("Waiting for state change in stop_recording()")
+            timeout = 2 * Gst.SECOND  # 2 second timeout
+            ret, state, pending = self.pipeline.get_state(timeout)
+            if ret == Gst.StateChangeReturn.SUCCESS:
+                logging.debug("Pipeline stopped successfully in stop_recording()")
+            elif ret == Gst.StateChangeReturn.TIMEOUT:
+                logging.warning("Pipeline stop timed out in stop_recording(), forcing NULL state")
+                self.pipeline.set_state(Gst.State.NULL)
+            else:
+                logging.warning(f"Pipeline stop failed in stop_recording() with return code: {ret}")
+                
+        except Exception as e:
+            logging.error(f"Error stopping pipeline in stop_recording(): {e}")
+            
+        # Quit the main loop
+        if hasattr(self, 'loop') and self.loop:
+            logging.debug("Quitting main loop in stop_recording()")
+            try:
+                self.loop.quit()
+                logging.debug("Main loop quit called in stop_recording()")
+            except Exception as e:
+                logging.warning(f"Error quitting main loop in stop_recording(): {e}")
 
     def on_bus_message(self, bus, message):
         if message.type == Gst.MessageType.EOS:
-            self.stop_recording()
+            # Don't call stop_recording here to avoid bus cleanup issues
+            logging.debug("EOS received, stopping pipeline")
+            self.pipeline.set_state(Gst.State.NULL)
+            if hasattr(self, 'loop') and self.loop:
+                self.loop.quit()
         elif message.type == Gst.MessageType.ERROR:
             err, debug = message.parse_error()
             logging.debug(f"Error: {err}, {debug}")
-            self.stop_recording()
+            self.pipeline.set_state(Gst.State.NULL)
+            if hasattr(self, 'loop') and self.loop:
+                self.loop.quit()
 
     def start(self):
         # Set up bus to monitor messages from the pipeline
+        logging.debug("Setting up GStreamer bus")
         self.bus = self.pipeline.get_bus()
         self.bus.add_signal_watch()
         # Connect to the 'level' signal
@@ -173,19 +217,62 @@ class delayRecord:
         self.bus.connect('message::element', self.monitor_levels)
         
         # Start playing the pipeline
-        self.pipeline.set_state(Gst.State.PLAYING)
+        logging.debug("Starting GStreamer pipeline")
+        ret = self.pipeline.set_state(Gst.State.PLAYING)
+        logging.debug(f"Pipeline set_state(PLAYING) returned: {ret}")
+        
+        if ret == Gst.StateChangeReturn.FAILURE:
+            logging.error("Failed to start pipeline")
+            return
+        
         logging.debug("Listening for voice...")
 
         # Main loop
         try:
+            logging.debug("Starting GLib main loop")
             self.loop = GLib.MainLoop()
             self.loop.run()
+            logging.debug("GLib main loop exited")
         except Exception as e:
-            logging.debug(f"Stopping...{e}")
+            logging.debug(f"Main loop exception: {e}")
 
         # Clean up
-        logging.debug("Cleanup")
-        self.pipeline.set_state(Gst.State.NULL)
+        logging.debug("Starting cleanup sequence")
+        
+        # Clean up bus connections first
+        if hasattr(self, 'bus') and self.bus:
+            logging.debug("Removing bus signal watch")
+            try:
+                self.bus.remove_signal_watch()
+                logging.debug("Bus signal watch removed")
+            except Exception as e:
+                logging.warning(f"Error removing bus signal watch: {e}")
+        
+        # Then stop pipeline
+        logging.debug("Setting pipeline to NULL state")
+        try:
+            ret = self.pipeline.set_state(Gst.State.NULL)
+            logging.debug(f"Pipeline set_state(NULL) returned: {ret}")
+            
+            # Wait for state change to complete with timeout
+            logging.debug("Waiting for pipeline state change to complete")
+            timeout = 2 * Gst.SECOND  # 2 second timeout
+            ret, state, pending = self.pipeline.get_state(timeout)
+            logging.debug(f"Pipeline final state: {state}, return: {ret}")
+            
+            if ret == Gst.StateChangeReturn.TIMEOUT:
+                logging.warning("Pipeline state change timed out, forcing cleanup")
+                # Force the state change
+                self.pipeline.set_state(Gst.State.NULL)
+                
+        except Exception as e:
+            logging.error(f"Error during pipeline cleanup: {e}")
+        
+        # Force garbage collection to help free GStreamer resources
+        import gc
+        gc.collect()
+        
+        logging.debug("Cleanup completed")
 
     # Draw a VU meter in the terminal
     def draw_meter(self, level:float):

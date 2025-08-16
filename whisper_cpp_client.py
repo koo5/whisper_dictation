@@ -34,12 +34,14 @@ import tracer
 from mimic3_client import say, shutup
 from on_screen import camera, show_pictures
 from record import delayRecord
+from persistent_record import PersistentAudioRecorder
 audio_queue = queue.Queue()
 listening = True
 chatting = False
 record_process = None
 running = True
 cam = None
+persistent_recorder = None
 
 # Define debug mode early
 debug = os.getenv("DEBUG_WHISPER", "false").lower() in ["true", "1", "yes", "y"]
@@ -55,8 +57,6 @@ no_keys = os.getenv("NO_KEYS", "false").lower() in ["true", "1", "yes", "y"]
 
 # Status indicator settings
 show_status = os.getenv("SHOW_PROCESSING_STATUS", "false").lower() in ["true", "1", "yes", "y"]
-processing_color = os.getenv("PROCESSING_COLOR", "\033[1;33m")  # Default: Yellow
-idle_color = os.getenv("IDLE_COLOR", "\033[1;32m")              # Default: Green
 
 # Language setting
 whisper_language =  os.getenv("WHISPER_LANGUAGE", NotGiven())
@@ -85,14 +85,13 @@ if not ignore_patterns and whisper_language:
         )
     elif lang == "en":
         # Regex pattern for English - exact matches for common whisper artifacts
-        ignore_patterns = r"^Thanks for watching!?\s*$|^Thank you( very much| so much)?\.?\s*$|^you\s*$|^Bye\.$|^Bye-bye\.$"
+        ignore_patterns = r"^\s*CLEAR THROAT\s*|^Thanks for watching!?\s*$|^Thank you( very much| so much)?\.?\s*$|^you\s*$|^Bye\.$|^Bye-bye\.$"
 
-reset_color = os.getenv("RESET_COLOR", "\033[0m")               # Default: Reset
 
 def show_processing_status():
     """Display processing status indicator"""
     if show_status:
-        output = f"{bs}{processing_color}[PROCESSING]{reset_color} Analyzing speech..."
+        output = "[PROCESSING] Analyzing speech..."
         if quiet_mode:
             print(output, end="", flush=True, file=sys.stderr)
         else:
@@ -101,7 +100,7 @@ def show_processing_status():
 def show_idle_status():
     """Display idle status indicator"""
     if show_status:
-        output = f"{bs}{idle_color}[IDLE]{reset_color} Waiting for speech input..."
+        output = "[IDLE] Waiting for speech input..."
         if quiet_mode:
             print(output, end="", flush=True, file=sys.stderr)
         else:
@@ -129,8 +128,6 @@ else:
         ]
     )
 
-# bs = "\b" * 99 # if your terminal does not support ANSI
-bs = "\033[1K\r"
 
 if debug:
     logging.debug(f"Debug mode enabled")
@@ -359,7 +356,7 @@ def gettext(f:str) -> str:
                 return transcription
                 
         except Exception as e:
-            logging.error(f"{bs}OpenAI API Error: {e}")
+            logging.error(f"OpenAI API Error: {e}")
             logging.info("Falling back to local server...")
             # Fall back to local server if OpenAI API fails
     
@@ -387,7 +384,7 @@ def gettext(f:str) -> str:
         return result[0]['text']
 
     except requests.exceptions.RequestException as e:
-        logging.error(f"{bs}Local Server Error: {e}")
+        logging.error(f"Local Server Error: {e}")
         # Show idle status even after error
         show_idle_status()
         return ""
@@ -431,7 +428,7 @@ def generate_text(prompt: str):
     
     # Show processing status for AI generation
     if show_status:
-        output = f"{bs}{processing_color}[PROCESSING]{reset_color} Generating AI response..."
+        output = "[PROCESSING] Generating AI response..."
         if quiet_mode:
             print(output, end="", flush=True, file=sys.stderr)
         else:
@@ -439,7 +436,7 @@ def generate_text(prompt: str):
     
     # Try chatGPT
     if gpt_key and client:
-        logging.debug(f"{bs}Asking ChatGPT")
+        logging.debug("Asking ChatGPT")
         try:
             completion = client.chat.completions.create(model="gpt-3.5-turbo",
             messages=messages)
@@ -482,9 +479,9 @@ def generate_text(prompt: str):
 
     if completion:
         if quiet_mode:
-            print(f"{bs}{completion}", file=sys.stderr)
+            print(f"{completion}", file=sys.stderr)
         else:
-            print(f"{bs}{completion}")
+            print(f"{completion}")
         # handle queries for more information
         if "more information?" in completion or \
             "It sounds like" in completion or \
@@ -563,11 +560,14 @@ def transcribe():
                 logging.debug(f"Transcribe loop iteration {iteration_count}, queue size: {audio_queue.qsize()}")
             
             # Get audio from queue with timeout to prevent hanging
+            logging.debug(f"About to check audio queue, iteration {iteration_count}")
             try:
                 f = audio_queue.get(timeout=5.0)  # 5 second timeout
+                logging.debug(f"Got file from queue: {f}")
             except queue.Empty:
                 if debug and iteration_count % 12 == 0:  # Log every minute
                     logging.debug("No audio in queue, continuing...")
+                logging.debug(f"Queue empty, continuing loop, iteration {iteration_count}")
                 continue
                 
             if f:
@@ -595,9 +595,9 @@ def transcribe():
                 # print messages [BLANK_AUDIO], (swoosh), *barking*
                 if re.search(r"[\(\[\*]", txt):
                     if quiet_mode:
-                        print(bs + txt.strip(), file=sys.stderr)
+                        print(txt.strip(), file=sys.stderr)
                     else:
-                        print(bs + txt.strip())
+                        print(txt.strip())
                     # filter it out
                     txt = re.sub(r'[\*\[\(][^\]\)]*[\]\)\*]*\s*$', '', txt)
                 if txt == " ":
@@ -611,9 +611,9 @@ def transcribe():
                     logging.debug(f"[IGNORED] Transcription matching pattern: '{txt.strip()}'")
                     # Always show ignored messages with [IGNORED] prefix
                     if quiet_mode:
-                        print(f"{bs}[IGNORED] {txt.strip()}", file=sys.stderr)
+                        print(f"[IGNORED] {txt.strip()}", file=sys.stderr)
                     else:
-                        print(f"{bs}[IGNORED] {txt.strip()}")
+                        print(f"[IGNORED] {txt.strip()}")
                     continue
                 # get lower-case spoken command string
                 lower_case = txt.lower().strip()
@@ -625,9 +625,9 @@ def transcribe():
                 txt = txt.strip(' \n') + ' '
                 if quiet_mode:
                     # In quiet mode, debug info goes to stderr
-                    print(bs + txt, file=sys.stderr)
+                    print(txt, file=sys.stderr)
                 else:
-                    print(bs + txt) # print the text
+                    print(txt) # print the text
 
                 # see list of actions and hotkeys at top of file :)
                 # Go to Website.
@@ -651,7 +651,9 @@ def transcribe():
                     logging.debug(f"Writing text to active window: '{txt}' (length: {len(txt)})")
                     try:
                         if not no_keys:
+                            logging.debug("About to call pyautogui.write()")
                             pyautogui.write(txt)
+                            logging.debug("pyautogui.write() completed")
                         if quiet_mode:
                             # In quiet mode, print ONLY the transcribed text to stdout
                             output_text = txt.strip()
@@ -659,14 +661,16 @@ def transcribe():
                                 print(output_text)
                             else:
                                 print(output_text, end='', flush=True)
-                        logging.debug("Text written successfully")
+                        logging.debug("Text written successfully, continuing to next iteration")
                     except Exception as e:
                         logging.error(f"Failed to write text: {e}")
             # continue looping every 1/5 second
             else: 
                 if debug and iteration_count % 50 == 0:  # Log every 10 seconds
                     logging.debug(f"Waiting for audio, iteration {iteration_count}")
+                logging.debug(f"About to sleep 0.2s in transcribe loop, iteration {iteration_count}")
                 time.sleep(0.2)
+                logging.debug(f"Woke up from sleep, back to queue check, iteration {iteration_count}")
         except KeyboardInterrupt:
             if not quiet_mode:
                 say("Goodbye.")
@@ -678,6 +682,10 @@ def transcribe():
                 logging.error("Too many errors in transcribe loop, pausing...")
                 time.sleep(5)
                 consecutive_errors = 0
+        
+        # End of while loop iteration
+        if debug:
+            logging.debug(f"Completed transcribe loop iteration {iteration_count}, going to next iteration")
 
 def record_mp3():
     global listening
@@ -696,67 +704,106 @@ def record_mp3():
 def record_to_queue():
     global record_process
     global running
-    recording_count = 0
-    consecutive_errors = 0
-    max_consecutive_errors = 5
-    recording_timeout = float(os.getenv("RECORDING_TIMEOUT", "10"))  # Default 10 seconds
+    global persistent_recorder
     
-    while running:
-        recording_count += 1
-        temp_file = tempfile.mktemp()+ '.wav'
-        logging.debug(f"Temporary file for recording #{recording_count}: {temp_file}")
+    # Check if we should use persistent recorder
+    use_persistent = os.getenv("USE_PERSISTENT_RECORDER", "false").lower() in ["true", "1", "yes", "y"]
+    
+    if use_persistent:
+        logging.debug("Using persistent audio recorder")
+        voice_threshold = float(os.getenv("VOICE_THRESHOLD", "-30"))
+        stop_after = float(os.environ.get("STOP_AFTER", "2"))
         
-        try:
-            logging.debug(f"Starting recording #{recording_count} to file: {temp_file}")
-            start_time = time.time()
+        # Create persistent recorder
+        persistent_recorder = PersistentAudioRecorder(
+            threshold=voice_threshold,
+            stop_after=stop_after
+        )
+        
+        if not persistent_recorder.start():
+            logging.error("Failed to start persistent audio recorder, falling back to original")
+            use_persistent = False
+        else:
+            logging.debug("Persistent audio recorder started")
+    
+    if use_persistent:
+        # Use persistent recorder
+        segment_count = 0
+        while running:
+            try:
+                segment_count += 1
+                logging.debug(f"Waiting for audio segment #{segment_count}")
+                
+                segment_file = persistent_recorder.get_audio_segment(timeout=5.0)
+                
+                if segment_file:
+                    logging.debug(f"Got audio segment: {segment_file}")
+                    audio_queue.put(segment_file)
+                else:
+                    if debug and segment_count % 12 == 0:
+                        logging.debug("No audio segments received, continuing...")
+                        
+            except Exception as e:
+                logging.error(f"Error in persistent recording loop: {e}")
+                time.sleep(1)
+                
+        if persistent_recorder:
+            persistent_recorder.stop()
+    else:
+        # Use original recorder (fallback)
+        logging.debug("Using original delayRecord system")
+        recording_count = 0
+        consecutive_errors = 0
+        max_consecutive_errors = 5
+        recording_timeout = float(os.getenv("RECORDING_TIMEOUT", "10"))
+        
+        while running:
+            recording_count += 1
+            temp_file = tempfile.mktemp() + '.wav'
+            logging.debug(f"=== STARTING RECORDING #{recording_count} ===")
+            logging.debug(f"Creating temp file: {temp_file}")
             
-            voice_threshold = float(os.getenv("VOICE_THRESHOLD", "-30"))
-            record_process = delayRecord(temp_file, threshold=voice_threshold)
-            record_process.stop_after = float(os.environ.get("STOP_AFTER", "2"))
-            
-            # Start recording in a separate thread to enable timeout
-            recording_thread = threading.Thread(target=record_process.start)
-            recording_thread.daemon = True
-            recording_thread.start()
-            
-            # Wait for recording with timeout
-            recording_thread.join(timeout=recording_timeout)
-            
-            if recording_thread.is_alive():
-                logging.error(f"Recording #{recording_count} timed out after {recording_timeout} seconds")
-                # Try to stop the recording
-                if record_process:
-                    try:
-                        record_process.stop_recording()
-                    except:
-                        pass
-                consecutive_errors += 1
-                continue
-            
-            elapsed = time.time() - start_time
-            logging.debug(f"Recording #{recording_count} completed in {elapsed:.2f} seconds")
-            
-            # Check if file was created and has content
-            if os.path.exists(temp_file) and os.path.getsize(temp_file) > 0:
-                audio_queue.put(record_process.file_name)
-                consecutive_errors = 0  # Reset error counter on success
-            else:
-                logging.error(f"Recording #{recording_count} produced empty or no file")
+            try:
+                voice_threshold = float(os.getenv("VOICE_THRESHOLD", "-30"))
+                logging.debug(f"Creating delayRecord instance with threshold: {voice_threshold}")
+                record_process = delayRecord(temp_file, threshold=voice_threshold)
+                record_process.stop_after = float(os.environ.get("STOP_AFTER", "2"))
+                logging.debug(f"delayRecord instance created successfully")
+                
+                logging.debug(f"Starting recording thread for recording #{recording_count}")
+                recording_thread = threading.Thread(target=record_process.start)
+                recording_thread.daemon = True
+                recording_thread.start()
+                logging.debug(f"Recording thread started, waiting for completion...")
+                
+                recording_thread.join(timeout=recording_timeout)
+                logging.debug(f"Recording thread join completed for recording #{recording_count}")
+                
+                if recording_thread.is_alive():
+                    logging.error(f"Recording #{recording_count} timed out")
+                    if record_process:
+                        try:
+                            record_process.stop_recording()
+                        except Exception as e:
+                            logging.error(f"Failed to stop recording: {e}")
+                    consecutive_errors += 1
+                    continue
+                
+                if os.path.exists(temp_file) and os.path.getsize(temp_file) > 0:
+                    audio_queue.put(record_process.file_name)
+                    consecutive_errors = 0
+                else:
+                    logging.error(f"Recording #{recording_count} produced empty file")
+                    consecutive_errors += 1
+                    
+            except Exception as e:
+                logging.error(f"Error during recording #{recording_count}: {e}")
                 consecutive_errors += 1
                 
-        except Exception as e:
-            logging.error(f"Error during recording #{recording_count}: {e}")
-            consecutive_errors += 1
-            
-        # If too many consecutive errors, pause and retry
-        if consecutive_errors >= max_consecutive_errors:
-            logging.error(f"Too many recording errors ({consecutive_errors}), pausing for 5 seconds...")
-            logging.error("This might be due to audio device issues (e.g., Bluetooth disconnection)")
-            time.sleep(5)
-            consecutive_errors = 0
-            
-        if debug and recording_count % 10 == 0:
-            logging.debug(f"Completed {recording_count} recordings so far")
+            if consecutive_errors >= max_consecutive_errors:
+                logging.error(f"Too many recording errors ({consecutive_errors}), pausing...")
+                time.sleep(5)
+                consecutive_errors = 0
 
 def discard_input():
     if quiet_mode:
@@ -772,15 +819,24 @@ def quit():
     logging.debug("\nStopping...")
     global running
     global listening
+    global persistent_recorder
     listening = False
     running = False
+    
+    # Stop persistent recorder
+    if persistent_recorder:
+        persistent_recorder.stop()
+        
+    # Stop old-style recorder if used
     if record_process:
         record_process.stop_recording()
+        
     record_thread.join()
+    
     # clean up
     try:
         while f := audio_queue.get_nowait():
-            logging.debug(f"{bs}Removing temporary file: {f}")
+            logging.debug(f"Removing temporary file: {f}")
             if f[:5] == "/tmp/": # safety check
                 os.remove(f)
     except Exception: pass
