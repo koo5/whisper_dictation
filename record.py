@@ -175,7 +175,7 @@ class delayRecord:
             ret, state, pending = self.pipeline.get_state(timeout)
             if ret == Gst.StateChangeReturn.SUCCESS:
                 logging.debug("Pipeline stopped successfully in stop_recording()")
-            elif ret == Gst.StateChangeReturn.TIMEOUT:
+            elif hasattr(Gst.StateChangeReturn, 'TIMEOUT') and ret == Gst.StateChangeReturn.TIMEOUT:
                 logging.warning("Pipeline stop timed out in stop_recording(), forcing NULL state")
                 self.pipeline.set_state(Gst.State.NULL)
             else:
@@ -260,10 +260,12 @@ class delayRecord:
             ret, state, pending = self.pipeline.get_state(timeout)
             logging.debug(f"Pipeline final state: {state}, return: {ret}")
             
-            if ret == Gst.StateChangeReturn.TIMEOUT:
+            if hasattr(Gst.StateChangeReturn, 'TIMEOUT') and ret == Gst.StateChangeReturn.TIMEOUT:
                 logging.warning("Pipeline state change timed out, forcing cleanup")
                 # Force the state change
                 self.pipeline.set_state(Gst.State.NULL)
+            elif ret != Gst.StateChangeReturn.SUCCESS:
+                logging.warning(f"Pipeline state change returned: {ret}, continuing anyway")
                 
         except Exception as e:
             logging.error(f"Error during pipeline cleanup: {e}")
@@ -295,7 +297,8 @@ class delayRecord:
             else:
                 meter_chars = '=' * num_chars + '-' * (mw - num_chars)
                 
-            meterString = f"[{meter_chars}] {(1 - level) * -sw:.1f} dB"
+            current_db = (1 - level) * -sw
+            meterString = f"[{meter_chars}] {current_db:.1f} dB (threshold: {self.threshold:.1f} dB)"
             print(f"\r{meterString}", end='', flush=True, file=sys.stderr)
         except Exception as e:
             logging.debug(f"Failed writing volume meter: {str(e)}")

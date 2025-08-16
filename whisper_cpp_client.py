@@ -88,15 +88,6 @@ if not ignore_patterns and whisper_language:
         ignore_patterns = r"^\s*CLEAR THROAT\s*|^Thanks for watching!?\s*$|^Thank you( very much| so much)?\.?\s*$|^you\s*$|^Bye\.$|^Bye-bye\.$"
 
 
-def show_processing_status():
-    """Display processing status indicator"""
-    if show_status:
-        output = "[PROCESSING] Analyzing speech..."
-        if quiet_mode:
-            print(output, end="", flush=True, file=sys.stderr)
-        else:
-            print(output, end="", flush=True)
-
 def show_idle_status():
     """Display idle status indicator"""
     if show_status:
@@ -319,9 +310,6 @@ def gettext(f:str) -> str:
     file_size = os.path.getsize(f)
     logging.debug(f"gettext: Processing audio file: {f} (size: {file_size} bytes)")
     
-    # Show processing status
-    show_processing_status()
-        
     # If OpenAI's Whisper API is enabled and API key is available
     if openai_whisper and client:
         try:
@@ -333,7 +321,18 @@ def gettext(f:str) -> str:
                 api_timeout = float(os.getenv("OPENAI_API_TIMEOUT", "30"))  # Default 30 seconds
                 
                 try:
-                    logging.info(f"Transcribing audio file '{f}' using OpenAI Whisper API with timeout {api_timeout} seconds")
+                    # Calculate audio duration
+                    import wave
+                    try:
+                        with wave.open(f, 'rb') as wav_file:
+                            frames = wav_file.getnframes()
+                            rate = wav_file.getframerate()
+                            duration = frames / float(rate)
+                        duration_str = f"{duration:.1f}s"
+                    except:
+                        duration_str = "unknown duration"
+                    
+                    logging.info(f"Transcribing audio file '{f}' ({duration_str}) using OpenAI Whisper API with timeout {api_timeout} seconds")
                     transcription = client.audio.transcriptions.create(
                         model=whisper_model,
                         file=audio_file,
