@@ -69,23 +69,94 @@ keep_repetitions = int(os.getenv("KEEP_REPETITIONS", "5"))  # Number of repetiti
 
 # Ignore patterns for transcriptions
 ignore_patterns = os.getenv("IGNORE_PATTERNS", "")
-if not ignore_patterns and whisper_language:
-    # Only apply default patterns if language is explicitly set
-    lang = str(whisper_language).lower()
-    if lang == "cs":
-        # Regex pattern for Czech - some are substring matches, some are exact
-        ignore_patterns = (
-            # Substring matches (anywhere in text)
-            r"http://johnyxcz\.blogspot\.com|" +
-            r"http://johnyxcz\.com|" +
-            r"Titulky vytvořil JohnyX|" +
-            r"www\.hradeckesluzby\.cz|" +
-            r"www\.arkance-systems\.cz|" +
-            r"děkujeme za pozornost"
-        )
-    elif lang == "en":
-        # Regex pattern for English - exact matches for common whisper artifacts
-        ignore_patterns = r"^\s*CLEAR THROAT\s*|^Thanks for watching!?\s*$|^Thank you( very much| so much)?\.?\s*$|^you\s*$|^Bye\.$|^Bye-bye\.$"
+
+def should_ignore_transcription(text):
+    """
+    Check if transcription should be ignored based on various patterns.
+    Returns True if the text should be ignored, False otherwise.
+    """
+    if not text:
+        return False
+    
+    text = text.strip()
+    text_lower = text.lower()
+    
+    # If user provided custom patterns via env var, use those
+    if ignore_patterns:
+        import re
+        if re.search(ignore_patterns, text, re.IGNORECASE):
+            return True
+    
+    # Default patterns based on language
+    if whisper_language:
+        lang = str(whisper_language).lower()
+        
+        if lang == "cs":
+            # Czech patterns - exact matches
+            exact_matches = [
+                "děkujeme za pozornost"
+            ]
+            
+            # Czech patterns - substring matches
+            substring_matches = [
+                "http://johnyxcz.blogspot.com",
+                "http://johnyxcz.com", 
+                "Titulky vytvořil JohnyX",
+                "www.hradeckesluzby.cz",
+                "www.arkance-systems.cz"
+            ]
+            
+            # Check exact matches
+            if text_lower in [p.lower() for p in exact_matches]:
+                return True
+                
+            # Check substring matches
+            for pattern in substring_matches:
+                if pattern.lower() in text_lower:
+                    return True
+                    
+        elif lang == "en":
+            # English patterns - exact matches
+            exact_matches = [
+                "thanks for watching",
+                "thanks for watching!",
+                "thank you",
+                "thank you very much",
+                "thank you so much",
+                "thank you.",
+                "you",
+                "bye.",
+                "bye-bye."
+            ]
+
+            # Check exact matches
+            if text_lower in [p.lower() for p in exact_matches]:
+                return True
+
+            # case-insensitive substring matches
+            substring_matches = [
+                "thanks for watching"
+            ]
+            # Check substring matches
+            for pattern in substring_matches:
+                if pattern.lower() in text_lower:
+                    return True
+
+            # English patterns - regex patterns for more complex matching
+            import re
+            regex_patterns = [
+                r"^\s*clear throat\s*$",
+                r"^\s*\[.*\]\s*$",  # [anything in brackets]
+                r"^\s*\(.*\)\s*$",  # (anything in parentheses)
+                r"^\s*\*.*\*\s*$"   # *anything in asterisks*
+            ]
+            
+            # Check regex patterns
+            for pattern in regex_patterns:
+                if re.match(pattern, text, re.IGNORECASE):
+                    return True
+    
+    return False
 
 
 def show_idle_status():
@@ -606,7 +677,7 @@ def transcribe():
                 txt = remove_repetitions(txt, min_repetitions, keep_repetitions)
                 
                 # Check against ignore patterns
-                if ignore_patterns and re.search(ignore_patterns, txt, re.IGNORECASE):
+                if should_ignore_transcription(txt):
                     logging.debug(f"[IGNORED] Transcription matching pattern: '{txt.strip()}'")
                     # Always show ignored messages with [IGNORED] prefix
                     if quiet_mode:
